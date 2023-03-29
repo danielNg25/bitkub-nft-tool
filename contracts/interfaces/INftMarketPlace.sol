@@ -44,18 +44,6 @@ interface INftMarketPlace {
 
     function totalOpenTradeId() external view returns (uint256);
 
-    function createTradeNext(
-        address _nftTokenOwner,
-        address _nftTokenAddress,
-        uint256 _nftTokenId,
-        uint256 _nftType,
-        address _kap20TokenAddress,
-        uint256 _price,
-        uint256 _amount,
-        uint256 _startTime,
-        uint256 _feeAmout
-    ) external;
-
     function createTrade(
         address _nftTokenAddress,
         uint256 _nftTokenId,
@@ -66,31 +54,16 @@ interface INftMarketPlace {
         uint256 _startTime
     ) external;
 
-    function closeTradeNext(
-        uint256 _tradeId,
-        address _userAddress,
-        uint256 _feeAmount
-    ) external;
-
-    function batchCloseTradeNext(
-        uint256 _tradeId,
-        address _userAddress,
-        uint256 _feeAmount
+    function batchCloseTrade(
+        uint256[] memory _tradeIds
     ) external;
 
     function closeTrade(uint256 _tradeId) external;
 
-    function completeTradeNext(
-        uint256 _tradeId,
-        address _userAddressComplete,
-        uint256 _amount
-    ) external;
+    function batchCompleteTrade(
+        uint256[] memory _tradeIds,
+        uint256[] memory _amounts
+    ) external payable;
 
-    function batchCompleteTradeNext(
-        uint256 _tradeId,
-        address _userAddressComplete,
-        uint256 _amount
-    ) external;
-
-    function completeTrade(uint256 _tradeId, uint256 _amount) external;
+    function completeTrade(uint256 _tradeId, uint256 _amount) external payable;
 }

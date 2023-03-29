@@ -18,46 +18,30 @@ const config: HardhatUserConfig = {
     defaultNetwork: "hardhat",
     networks: {
         hardhat: {
-            accounts: { count: 100 },
+            accounts: { count: 10 },
         },
-        rinkeby: {
-            url: `https://rinkeby.infura.io/v3/${process.env.INFURA_API_KEY}`,
+        bktestnet: {
+            url: `https://rpc-testnet.bitkubchain.io/`,
             accounts: [`${process.env.PRIVATE_KEY}`],
         },
-        goerli: {
-            url: `https://goerli.infura.io/v3/${process.env.INFURA_API_KEY}`,
+        bkmainnet: {
+            url: `https://dataseed.bitkubchain.org/`,
             accounts: [`${process.env.PRIVATE_KEY}`],
         },
-        // mainnet: {
-        //     url: `https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
-        //     accounts: [`${process.env.PRIVATE_KEY}`]
-        // }
-
-        mumbai: {
-            url: `https://matic-mumbai.chainstacklabs.com/`,
-            accounts: [`${process.env.PRIVATE_KEY}`],
-        },
-        bsctestnet: {
-            url: `https://data-seed-prebsc-1-s1.binance.org:8545/`,
-            accounts: [`${process.env.PRIVATE_KEY}`],
-        },
-    },
-    etherscan: {
-        apiKey: `${process.env.POLYGONSCAN_KEY}`,
     },
     solidity: {
         compilers: [
             {
-                version: "0.8.16",
+                version: "0.8.17",
                 settings: {
                     optimizer: {
                         enabled: true,
                         runs: 200,
-                        details: {
-                            yul: true,
-                        },
+                        // details: {
+                        //     yul: true,
+                        // },
                     },
-                    viaIR: true,
+                    // viaIR: true,
                 },
             },
         ],

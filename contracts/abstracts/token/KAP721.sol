@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import "../Pausable.sol";
-import "../KYCHandler.sol";
 import "../token/KAP165.sol";
 import "../project/Authorization.sol";
 import "../../interfaces/token/IKAP721.sol";
@@ -13,6 +12,7 @@ import "../../libraries/Address.sol";
 import "../../libraries/Strings.sol";
 import "../../libraries/EnumerableSetUint.sol";
 import "../../libraries/EnumerableMap.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 abstract contract KAP721 is
     IKAP721,
@@ -20,8 +20,8 @@ abstract contract KAP721 is
     IKAP721Enumerable,
     KAP165,
     Authorization,
-    KYCHandler,
-    Pausable
+    Pausable,
+    Ownable
 {
     using Address for address;
     using Strings for uint256;
@@ -63,35 +63,19 @@ abstract contract KAP721 is
         string memory symbol_,
         string memory project_,
         address adminRouter_,
-        address _transferRouter,
-        address kyc_,
-        uint256 acceptedKycLevel_
+        address _transferRouter
     ) Authorization(project_) {
         name = name_;
         symbol = symbol_;
         adminRouter = IAdminProjectRouter(adminRouter_);
         transferRouter = _transferRouter;
-        kyc = IKYCBitkubChain(kyc_);
-        acceptedKycLevel = acceptedKycLevel_;
     }
 
-    function activateOnlyKycAddress() public onlySuperAdmin {
-        _activateOnlyKycAddress();
-    }
-
-    function setKYC(IKYCBitkubChain _kyc) public onlySuperAdmin {
-        _setKYC(_kyc);
-    }
-
-    function setAcceptedKycLevel(uint256 _kycLevel) public onlySuperAdmin {
-        _setAcceptedKycLevel(_kycLevel);
-    }
-
-    function pause() public onlySuperAdmin {
+    function pause() public onlyOwner {
         _pause();
     }
 
-    function unpause() public onlySuperAdmin {
+    function unpause() public onlyOwner {
         _unpause();
     }
 
@@ -215,11 +199,6 @@ abstract contract KAP721 is
         address recipient,
         uint256 tokenId
     ) external override onlySuperAdminOrTransferRouter returns (bool) {
-        require(
-            kyc.kycsLevel(sender) >= acceptedKycLevel && kyc.kycsLevel(recipient) >= acceptedKycLevel,
-            "Only internal purpose"
-        );
-
         _transfer(sender, recipient, tokenId);
         return true;
     }
@@ -229,8 +208,6 @@ abstract contract KAP721 is
         address recipient,
         uint256 tokenId
     ) external override onlySuperAdminOrTransferRouter returns (bool) {
-        require(kyc.kycsLevel(sender) >= acceptedKycLevel, "Only external purpose");
-
         _transfer(sender, recipient, tokenId);
         return true;
     }

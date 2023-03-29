@@ -5,8 +5,12 @@ import { Config } from "./config";
 async function main() {
     try {
         await hre.run("verify:verify", {
-            address: contracts.greeter,
-            constructorArguments: [Config.greeter],
+            address: contracts.storeFactory,
+            constructorArguments: [
+                Config.project,
+                Config.adminRouter,
+                Config.transferRouter,
+            ],
             hre,
         });
     } catch (err) {

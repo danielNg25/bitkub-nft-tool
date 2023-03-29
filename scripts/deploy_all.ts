@@ -4,7 +4,12 @@ import { Signer } from "ethers";
 const ethers = hre.ethers;
 import { Config } from "./config";
 
-import { Greeter__factory, Greeter } from "../typechain-types";
+import {
+    StoreFactory__factory,
+    NftMarketPlace__factory,
+    StoreFactory,
+    NftMarketPlace,
+} from "../typechain-types";
 
 async function main() {
     //Loading accounts
@@ -12,8 +17,11 @@ async function main() {
     const admin = await accounts[0].getAddress();
     //Loading contracts' factory
 
-    const Greeter: Greeter__factory = await ethers.getContractFactory(
-        "Greeter",
+    const NftMarketPlaceFactory: NftMarketPlace__factory =
+        await ethers.getContractFactory("NftMarketPlace");
+
+    const StoreFactory: StoreFactory__factory = await ethers.getContractFactory(
+        "StoreFactory",
     );
 
     // Deploy contracts
@@ -27,12 +35,22 @@ async function main() {
 
     console.log("ACCOUNT: " + admin);
 
-    const greeter: Greeter = await Greeter.deploy(Config.greeter);
+    const nftMarketPlace: NftMarketPlace = await NftMarketPlaceFactory.deploy();
 
-    console.log("Greeter deployed at: ", greeter.address);
+    console.log("NFTMarketPlace deployed at: ", nftMarketPlace.address);
+
+    const storeFactory: StoreFactory = await StoreFactory.deploy(
+        Config.project,
+        Config.adminRouter,
+        Config.transferRouter,
+        nftMarketPlace.address,
+    );
+
+    console.log("StoreFactory deployed at: ", storeFactory.address);
 
     const contractAddress = {
-        greeter: greeter.address,
+        nftMarketPlace: nftMarketPlace.address,
+        storeFactory: storeFactory.address,
     };
 
     fs.writeFileSync("contracts.json", JSON.stringify(contractAddress));
