@@ -1,23 +1,94 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./interfaces/INftMarketPlace.sol";
 import "./abstracts/token/NftHolder.sol";
 import "./abstracts/Pausable.sol";
 import "./libraries/EnumerableSetUint.sol";
+import "./libraries/EnumerableSetAddress.sol";
 import "./interfaces/token/IKAP20.sol";
 import "./interfaces/token/IKAP721.sol";
-import "./interfaces/token/IKAP1155.sol";
+import "./interfaces/token/IKAP721Metadata.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "hardhat/console.sol";
 
-contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
+contract NftMarketPlace is Ownable, Pausable, NftHolder {
     using EnumerableSetUint for EnumerableSetUint.UintSet;
+    using EnumerableSetAddress for EnumerableSetAddress.AddressSet;
 
+    struct TradeInfo {
+        uint256 tradeId;
+        address nftTokenOwner;
+        address nftTokenAddress;
+        uint256 nftTypeId;
+        EnumerableSetUint.UintSet allTokenId;
+        EnumerableSetUint.UintSet remainingTokenId;
+        address paymentToken;
+        uint256 price;
+        uint256 startTime;
+    }
+
+    struct TradeInfoReturn {
+        uint256 tradeId;
+        address nftTokenOwner;
+        address nftTokenAddress;
+        uint256 nftTypeId;
+        uint256[] remainingTokenId;
+        uint256 totalSupply;
+        string typeIdUri;
+        address paymentToken;
+        uint256 price;
+        uint256 startTime;
+    }
+
+    struct TypeIdInfoReturn {
+        address storeAddress;
+        uint256 typeId;
+        string typeIdUri;
+        uint256 totalSupply;
+        uint256 remaining;
+    }
     ///////////////////////////////////////////////////////////////////////////////////////
-
-    TradeInfo[] private _allTradeInfo;
+    uint256 private constant bitOffset = 17;
+    uint256 public totalTradeInfo;
+    mapping (uint256 => TradeInfo) private _allTradeInfo;
     EnumerableSetUint.UintSet private _openTradeID;
+    EnumerableSetAddress.AddressSet private _activeStore;
 
+    mapping (address => EnumerableSetUint.UintSet) private _storeToOpenTypeId;
+
+    mapping (address => mapping(uint256 => uint256)) private _typeIdToTradeIdByStore;
+
+    event CreateTrade(
+        uint256 indexed tradeId,
+        address indexed nftTokenOwner,
+        address indexed nftTokenAddress,
+        uint256 nftTokenId,
+        uint256 nftType,
+        address kap20TokenAddress,
+        uint256 price,
+        uint256 amount,
+        uint256 startTime
+    );
+
+    event AddTradeItem(
+        uint256 indexed tradeId,
+        address indexed nftTokenOwner,
+        address indexed nftTokenAddress,
+        uint256 nftTypeId,
+        uint256 nftTokenId
+    );
+
+    event UpdateTrade(
+        uint256 indexed tradeId,
+        address indexed nftTokenOwner,
+        address paymentToken,
+        uint256 price,
+        uint256 startTime
+    );
+
+    event CloseTrade(uint256 indexed tradeId);
+
+    event CompleteTrade(uint256 indexed tradeId, address indexed userAddressComplete, uint256 amount);
     ///////////////////////////////////////////////////////////////////////////////////////
 
     constructor() {
@@ -35,24 +106,100 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
 
     ///////////////////////////////////////////////////////////////////////////////////////
 
-    function getTradeInfoById(uint256 _tradeId) external view override returns (TradeInfo memory) {
-        return _allTradeInfo[_tradeId - 1];
+    function getTradeInfoById(uint256 _tradeId) external view returns (TradeInfoReturn memory) {
+        TradeInfo storage tradeInfo = _allTradeInfo[_tradeId - 1];
+        return _getTradeInfoReturn(tradeInfo);
     }
 
-    function totalTradeInfo() external view override returns (uint256) {
-        return _allTradeInfo.length;
-    }
-
-    function getOpenTradeIdByPage(uint256 _page, uint256 _limit) external view override returns (uint256[] memory) {
+    function getOpenTradeIdByPage(uint256 _page, uint256 _limit) external view returns (uint256[] memory) {
         return _openTradeID.get(_page, _limit);
     }
 
-    function getOpenTradeIdAll() external view override returns (uint256[] memory) {
+    function getOpenTradeIdAll() external view returns (uint256[] memory) {
         return _openTradeID.getAll();
     }
 
-    function totalOpenTradeId() external view override returns (uint256) {
+    function totalOpenTradeId() external view returns (uint256) {
         return _openTradeID.length();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////
+
+    function getAllActiveStore() external view returns (address[] memory) {
+        return _activeStore.getAll();
+    }
+
+    function getActiveStoreByPage(uint256 _page, uint256 _limit) external view returns (address[] memory) {
+        return _activeStore.get(_page, _limit);
+    }
+
+    function totalActiveStore() external view returns (uint256) {
+        return _activeStore.length();
+    }
+
+    function getAllOpenTradeIdByStore(address _store) external view returns (uint256[] memory) {
+        uint256[] memory typeIds = _storeToOpenTypeId[_store].getAll();
+        uint256[] memory tradeIds = new uint256[](typeIds.length);
+        for (uint256 i = 0; i < typeIds.length; i++) {
+            tradeIds[i] = _typeIdToTradeIdByStore[_store][typeIds[i]];
+        }
+        return tradeIds;
+    }
+    
+    function getOpenTradeIdByStoreByPage(address _store, uint256 _page, uint256 _limit) external view returns (uint256[] memory) {
+        uint256[] memory typeIds = _storeToOpenTypeId[_store].get(_page, _limit);
+        uint256[] memory tradeIds = new uint256[](typeIds.length);
+        for (uint256 i = 0; i < typeIds.length; i++) {
+            tradeIds[i] = _typeIdToTradeIdByStore[_store][typeIds[i]];
+        }
+        return tradeIds;
+    }
+
+    function totalOpenTradeByStore(address _store) external view returns (uint256) {
+        return _storeToOpenTypeId[_store].length();
+    }
+
+    function getAllOpenTradeInfoByStore(address _store) external view returns (TradeInfoReturn[] memory) {
+        uint256[] memory typeIds = _storeToOpenTypeId[_store].getAll();
+        TradeInfoReturn[] memory tradeInfoReturns = new TradeInfoReturn[](typeIds.length);
+        for (uint256 i = 0; i < typeIds.length; i++) {
+            uint256 tradeId = _typeIdToTradeIdByStore[_store][typeIds[i]];
+            TradeInfo storage tradeInfo = _allTradeInfo[tradeId - 1];
+            tradeInfoReturns[i] = _getTradeInfoReturn(tradeInfo);
+        }
+        return tradeInfoReturns;
+    }
+    
+    function getTypeIdOfStoreByPage(address _store, uint256 _page, uint256 _limit) external view returns (uint256[] memory) {
+        return _storeToOpenTypeId[_store].get(_page, _limit);
+    }
+
+
+    function getOpenTradeInfoByStoreByPage(address _store, uint256 _page, uint256 _limit) external view returns (TradeInfoReturn[] memory) {
+        uint256[] memory typeIds = _storeToOpenTypeId[_store].get(_page, _limit);
+        TradeInfoReturn[] memory tradeInfoReturns = new TradeInfoReturn[](typeIds.length);
+        for (uint256 i = 0; i < typeIds.length; i++) {
+            uint256 tradeId = _typeIdToTradeIdByStore[_store][typeIds[i]];
+            TradeInfo storage tradeInfo = _allTradeInfo[tradeId - 1];
+            tradeInfoReturns[i] = _getTradeInfoReturn(tradeInfo);
+        }
+        return tradeInfoReturns;
+    }
+
+    function _getTradeInfoReturn(TradeInfo storage tradeInfo) private view returns (TradeInfoReturn memory) {
+        string memory tokenUri = IKAP721Metadata(tradeInfo.nftTokenAddress).tokenURI(tradeInfo.allTokenId.at(0));
+        return TradeInfoReturn(
+            tradeInfo.tradeId,
+            tradeInfo.nftTokenOwner,
+            tradeInfo.nftTokenAddress,
+            tradeInfo.nftTypeId,
+            tradeInfo.remainingTokenId.getAll(),
+            tradeInfo.allTokenId.length(),
+            tokenUri,
+            tradeInfo.paymentToken,
+            tradeInfo.price,
+            tradeInfo.startTime
+        );
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////
@@ -66,39 +213,64 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
         return true;
     }
 
-    function setApprovalForAll(
-        address _tokenAddress,
-        address _operator,
-        bool _approved
-    ) external onlyOwner whenNotPaused returns (bool) {
-        IKAP1155(_tokenAddress).setApprovalForAll(_operator, _approved);
-        return true;
-    }
-
     ///////////////////////////////////////////////////////////////////////////////////////
 
     function createTrade(
         address _nftTokenAddress,
         uint256 _nftTokenId,
-        uint256 _nftType,
-        address _kap20TokenAddress,
+        address _paymentToken,
         uint256 _price,
-        uint256 _amount,
         uint256 _startTime
-    ) external override whenNotPaused {
+    ) external whenNotPaused {
         _createTrade(
             msg.sender,
             _nftTokenAddress,
             _nftTokenId,
-            _nftType,
-            _kap20TokenAddress,
+            _paymentToken,
             _price,
-            _amount,
-            _startTime
+            _startTime,
+            msg.sender
         );
     }
 
-    function closeTrade(uint256 _tradeId) external override whenNotPaused {
+    function addTradeItem(
+        address _nftTokenAddress,
+        uint256 _nftTypeId,
+        uint256 _nftTokenId
+    ) external whenNotPaused {
+        _addTradeItem(msg.sender, _nftTokenAddress, _nftTypeId, _nftTokenId);
+    }
+
+    function updateTrade(
+        uint256 _tradeId,
+        address _newNftOwner,
+        address _paymentToken,
+        uint256 _price,
+        uint256 _startTime
+    ) external whenNotPaused {
+        _updateTrade(_tradeId, _newNftOwner, _paymentToken, _price, _startTime);
+    }
+
+    function createTradeAndDelegate(
+        address _nftTokenAddress,
+        uint256 _nftTokenId,
+        address _paymentToken,
+        uint256 _price,
+        uint256 _startTime,
+        address _tradeOperator
+    )   external whenNotPaused {
+        _createTrade(
+            msg.sender,
+            _nftTokenAddress,
+            _nftTokenId,
+            _paymentToken,
+            _price,
+            _startTime,
+            _tradeOperator
+        );
+    }
+
+    function closeTrade(uint256 _tradeId) external whenNotPaused {
         require(_allTradeInfo[_tradeId - 1].nftTokenOwner == msg.sender, "Not owner of this trade");
         _closeTrade(_tradeId);
     }
@@ -113,21 +285,17 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
         }
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////
-
-    function completeTrade(uint256 _tradeId, uint256 _amount) external override payable whenNotPaused {
-        _completeTrade(_tradeId, msg.sender, _amount);
+    function completeTrade(uint256 _tradeId) external payable whenNotPaused {
+        _completeTrade(_tradeId, msg.sender);
     }
 
     function batchCompleteTrade(
-        uint256[] memory _tradeIds,
-        uint256[] memory _amounts
+        uint256[] memory _tradeIds
     ) external payable whenNotPaused {
         uint256 length = _tradeIds.length;
-        require(length == _amounts.length, "Length not match");
         uint256 totalWeiPrice = 0;
         for (uint256 i = 0; i < length; i++) {
-            totalWeiPrice += _completeTrade(_tradeIds[i], msg.sender, _amounts[i]);
+            totalWeiPrice += _completeTrade(_tradeIds[i], msg.sender);
         }
         require(msg.value >= totalWeiPrice, "Not enough price");
     }
@@ -138,51 +306,108 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
         address _nftTokenOwner,
         address _nftTokenAddress,
         uint256 _nftTokenId,
-        uint256 _nftType,
-        address _kap20TokenAddress,
+        address _paymentToken,
         uint256 _price,
-        uint256 _amount,
-        uint256 _startTime
+        uint256 _startTime,
+        address _tradeOperator
     ) internal {
-        require(_amount > 0, "Amount must be more than 0");
+        IKAP721(_nftTokenAddress).safeTransferFrom(_nftTokenOwner, address(this), _nftTokenId);
+        uint256 _typeId = (_nftTokenId >> bitOffset) << bitOffset;
+        require(_typeIdToTradeIdByStore[_nftTokenAddress][_typeId] == 0, "This type of NFT is already on sale");
+        uint256 tradeId = totalTradeInfo + 1;
 
-        if (_nftType == 0) {
-            IKAP721(_nftTokenAddress).safeTransferFrom(_nftTokenOwner, address(this), _nftTokenId);
-            _amount = 1;
-        } else {
-            IKAP1155(_nftTokenAddress).safeTransferFrom(_nftTokenOwner, address(this), _nftTokenId, _amount, "");
+        TradeInfo storage tradeInfo = _allTradeInfo[tradeId - 1];
+        tradeInfo.tradeId = tradeId;
+        tradeInfo.nftTokenOwner = _tradeOperator;
+        tradeInfo.nftTokenAddress = _nftTokenAddress;
+        tradeInfo.nftTypeId = _typeId;
+        tradeInfo.paymentToken = _paymentToken;
+        tradeInfo.price = _price;
+        tradeInfo.startTime = _startTime;
+        tradeInfo.allTokenId.add(_nftTokenId);
+        tradeInfo.remainingTokenId.add(_nftTokenId);
+
+        _openTradeID.add(tradeId);
+        if(_storeToOpenTypeId[_nftTokenAddress].length() == 0){
+            _activeStore.add(_nftTokenAddress);
         }
-
-        _allTradeInfo.push(
-            TradeInfo({
-                tradeId: _allTradeInfo.length + 1,
-                nftTokenOwner: _nftTokenOwner,
-                nftTokenAddress: _nftTokenAddress,
-                nftTokenId: _nftTokenId,
-                nftType: _nftType,
-                kap20TokenAddress: _kap20TokenAddress,
-                price: _price,
-                startTime: _startTime,
-                totalAmount: _amount,
-                currentAmount: _amount,
-                userAddressComplete: new address[](0),
-                amountComplete: new uint256[](0),
-                isClose: false
-            })
-        );
-
-        _openTradeID.add(_allTradeInfo.length);
-
+        
+        if (!_storeToOpenTypeId[_nftTokenAddress].contains(_typeId))
+        {
+            _storeToOpenTypeId[_nftTokenAddress].add(_typeId);
+        }
+        _typeIdToTradeIdByStore[_nftTokenAddress][_typeId] = tradeId;
+        totalTradeInfo++;
         emit CreateTrade(
-            _allTradeInfo.length,
-            _nftTokenOwner,
+            tradeId,
+            _tradeOperator,
             _nftTokenAddress,
             _nftTokenId,
-            _nftType,
-            _kap20TokenAddress,
+            _typeId,
+            _paymentToken,
             _price,
-            _amount,
+            1,
             _startTime
+        );
+    }
+
+    function _addTradeItem(
+        address _nftTokenOwner,
+        address _nftTokenAddress,
+        uint256 _nftTypeId,
+        uint256 _nftTokenId
+    ) internal {
+        uint256 _typeId = (_nftTokenId >> bitOffset) << bitOffset;
+        require(_typeId == _nftTypeId, "Type Id is not match");
+        uint256 tradeId = _typeIdToTradeIdByStore[_nftTokenAddress][_typeId];
+        require(tradeId != 0, "Use createTrade instead");
+        TradeInfo storage tradeInfo = _allTradeInfo[tradeId - 1];
+        IKAP721(_nftTokenAddress).safeTransferFrom(_nftTokenOwner, address(this), _nftTokenId);
+        if (!tradeInfo.allTokenId.contains(_nftTokenId))
+        {
+            tradeInfo.allTokenId.add(_nftTokenId);
+        }
+        tradeInfo.remainingTokenId.add(_nftTokenId);
+        emit AddTradeItem(
+            tradeId,
+            _nftTokenOwner,
+            _nftTokenAddress,
+            _typeId,
+            _nftTokenId
+        );
+
+        emit CreateTrade(
+            tradeId,
+            tradeInfo.nftTokenOwner,
+            _nftTokenAddress,
+            _nftTokenId,
+            _typeId,
+            tradeInfo.paymentToken,
+            tradeInfo.price,
+            1,
+            tradeInfo.startTime
+        );
+    }
+
+    function _updateTrade(
+        uint256 _tradeId,
+        address _nftTokenOwner,
+        address _paymentToken,
+        uint256 _price,
+        uint256 _startTime
+    ) internal {
+        TradeInfo storage tradeInfo = _allTradeInfo[_tradeId - 1];
+        require(tradeInfo.nftTokenOwner == msg.sender, "Not owner of this trade");
+        tradeInfo.nftTokenOwner = _nftTokenOwner;
+        tradeInfo.paymentToken = _paymentToken;
+        tradeInfo.price = _price;
+        tradeInfo.startTime = _startTime;
+        emit UpdateTrade(
+            _tradeId,
+            tradeInfo.nftTokenOwner,
+            tradeInfo.paymentToken,
+            tradeInfo.price,
+            tradeInfo.startTime
         );
     }
 
@@ -196,13 +421,17 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
     }
 
     function _closeTradeInternal(TradeInfo storage tradeInfoTmp) internal {
-        if (tradeInfoTmp.nftType == 0) {
-            IKAP721(tradeInfoTmp.nftTokenAddress).safeTransferFrom(address(this), tradeInfoTmp.nftTokenOwner, tradeInfoTmp.nftTokenId);
-        } else {
-            IKAP1155(tradeInfoTmp.nftTokenAddress).safeTransferFrom(address(this), tradeInfoTmp.nftTokenOwner, tradeInfoTmp.nftTokenId, tradeInfoTmp.currentAmount, "");
-        }
+        address nftTokenAddress = tradeInfoTmp.nftTokenAddress;
+        console.log(tradeInfoTmp.tradeId);
 
-        tradeInfoTmp.isClose = true;
+        uint256 length = tradeInfoTmp.remainingTokenId.length();
+        for (uint i = 0; i < length; i++) {
+            uint256 tokenId = tradeInfoTmp.remainingTokenId.at(0);
+            IKAP721(nftTokenAddress).safeTransferFrom(address(this), tradeInfoTmp.nftTokenOwner, tokenId);
+            tradeInfoTmp.remainingTokenId.remove(tokenId);
+        }
+        console.log(tradeInfoTmp.nftTypeId);
+        _storeToOpenTypeId[nftTokenAddress].remove(tradeInfoTmp.nftTypeId);
         _openTradeID.remove(tradeInfoTmp.tradeId);
 
         emit CloseTrade(tradeInfoTmp.tradeId);
@@ -212,46 +441,42 @@ contract NftMarketPlace is INftMarketPlace, Ownable, Pausable, NftHolder {
 
     function _completeTrade(
         uint256 _tradeId,
-        address _userAddressComplete,
-        uint256 _amount
+        address _userAddressComplete
     ) internal returns (uint256) {
         TradeInfo storage tradeInfoTmp = _allTradeInfo[_tradeId - 1];
         require(_openTradeID.contains(_tradeId), "Trade is not open");
         require(block.timestamp > tradeInfoTmp.startTime, "Not time to trade");
-        require(_amount > 0, "Amount must be more than 0");
-        require(tradeInfoTmp.currentAmount >= _amount, "Insufficient amount");
 
-        return _completeTradeInternal(tradeInfoTmp, _userAddressComplete, _amount);
+        return _completeTradeInternal(tradeInfoTmp, _userAddressComplete);
     }
 
     function _completeTradeInternal(
         TradeInfo storage tradeInfoTmp,
-        address _userAddressComplete,
-        uint256 _amount
+        address _userAddressComplete
     ) internal returns (uint256 price) {
-        price = tradeInfoTmp.price * _amount;
-        if (tradeInfoTmp.kap20TokenAddress != address(0)){
-            IKAP20(tradeInfoTmp.kap20TokenAddress).transferFrom(_userAddressComplete, address(this),  price);
+        price = tradeInfoTmp.price;
+        address nftTokenAddress = tradeInfoTmp.nftTokenAddress;
+        if (tradeInfoTmp.paymentToken != address(0)){
+            IKAP20(tradeInfoTmp.paymentToken).transferFrom(_userAddressComplete, tradeInfoTmp.nftTokenOwner,  price);
             price = 0;
         } else {
             require(msg.value >= price, "Insufficient price amount");
+            payable(tradeInfoTmp.nftTokenOwner).transfer(price);
         }
 
-        if (tradeInfoTmp.nftType == 0) {
-            IKAP721(tradeInfoTmp.nftTokenAddress).safeTransferFrom(address(this), _userAddressComplete, tradeInfoTmp.nftTokenId);
-        } else {
-            IKAP1155(tradeInfoTmp.nftTokenAddress).safeTransferFrom(address(this), _userAddressComplete, tradeInfoTmp.nftTokenId, _amount, "");
-        }
+        uint256 tokenId = tradeInfoTmp.remainingTokenId.at(0);
+        IKAP721(nftTokenAddress).safeTransferFrom(address(this), _userAddressComplete, tokenId);
 
-        tradeInfoTmp.currentAmount -= _amount;
-        tradeInfoTmp.userAddressComplete.push(_userAddressComplete);
-        tradeInfoTmp.amountComplete.push(_amount);
-
-        if (tradeInfoTmp.currentAmount == 0) {
-            tradeInfoTmp.isClose = true;
+        tradeInfoTmp.remainingTokenId.remove(tokenId);
+        if (tradeInfoTmp.remainingTokenId.length() == 0){
+            _storeToOpenTypeId[nftTokenAddress].remove(tradeInfoTmp.nftTypeId);
             _openTradeID.remove(tradeInfoTmp.tradeId);
         }
 
-        emit CompleteTrade(tradeInfoTmp.tradeId, _userAddressComplete, _amount);
+        if(_storeToOpenTypeId[nftTokenAddress].length() == 0){
+            _activeStore.remove(nftTokenAddress);
+        }
+
+        emit CompleteTrade(tradeInfoTmp.tradeId, _userAddressComplete, 1);
     }
 }

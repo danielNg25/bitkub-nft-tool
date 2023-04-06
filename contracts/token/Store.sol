@@ -9,8 +9,6 @@ contract Store is IStore, KAP721 {
 
     uint256 public constant bitOffset = 17;
 
-    string public image;
-
     // Mapping from typeID to mintNum
     mapping(uint256 => uint256) public mintCounter;
     
@@ -29,12 +27,11 @@ contract Store is IStore, KAP721 {
         string memory baseURI_,
         address transferRouter_,
         address adminRouter_,
-        address operator
+        address owner
     ) KAP721(name_, symbol_, project_, adminRouter_, transferRouter_) {
         _setBaseURI(baseURI_);
         operators[msg.sender] = true;
-        operators[operator] = true;
-        _transferOwnership(operator);
+        _transferOwnership(owner);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////
@@ -67,16 +64,12 @@ contract Store is IStore, KAP721 {
         operators[operator] = false;
     }
 
-    function setTypeURI(uint256 _typeId, string calldata _typeURI) external override onlyOwner {
+    function setTypeURI(uint256 _typeId, string calldata _typeURI) external override onlyOperator {
         _setTypeURI(_typeId, _typeURI);
     }
 
     function setBaseURI(string calldata _baseURI) external override onlyOwner {
         _setBaseURI(_baseURI);
-    }
-
-    function setImage(string calldata _image) external onlyOwner {
-        image = _image;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////
@@ -103,10 +96,10 @@ contract Store is IStore, KAP721 {
     function mintBatchByTypeId(address _to, uint256 _typeId, uint256 _amount) external onlyOperator  returns (uint256[] memory) {
         uint256 _firstTokenId = _typeId + mintCounter[_typeId];
         uint256 _lastTokenId = _typeId + mintCounter[_typeId] + _amount - 1;
-        require(((_firstTokenId >> bitOffset) << bitOffset) == _typeId && ((_lastTokenId >> bitOffset) << bitOffset) == _typeId, "Invalid typeId");
+        require(((_firstTokenId >> bitOffset) << bitOffset) == _typeId && ((_lastTokenId >> bitOffset) << bitOffset) == _typeId, "Not enough token in typeId");
         uint256[] memory _tokenIds = new uint256[](_amount);
         for (uint256 i = 0; i < _amount; i++) {
-            uint256 _tokenId = _typeId + mintCounter[_typeId] + i;
+            uint256 _tokenId = _firstTokenId + i;
             _tokenIds[i] = _tokenId;
             _mintInternalByTypeId(_to, _tokenId, _typeId);
         }
